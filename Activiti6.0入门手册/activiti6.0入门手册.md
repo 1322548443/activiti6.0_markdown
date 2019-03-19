@@ -532,16 +532,188 @@ System.out.prntln("查询的引擎实例："＋ engineTest) ;
 
 
 
-## 四、流程储存
+## 四、用户组与用户
+
+### 1. 用户组的管理
+
+#### 1.1 Group对象
+
+​	Group是一个接口，每一个Group实例表示一条用户组数据，它有一个子接口GroupEntity和一个实现类GroupEntityImpl，实现类提供了Group对应的表==act_id_group==中**NAME_**和**TYPE_**字段的get/set方法
+
+| 字段名 | 属性                               |
+| ------ | ---------------------------------- |
+| ID_    | Group主键，创建Group的时候指定     |
+| REV_   | 用户组数据的版本，每修改一次都会+1 |
+| NAME_  | 用户组名称                         |
+| TYPE_  | 用户组的类别                       |
+
+#### 1.2 创建用户组
+
+```java
+/*创建用户组
+*省略了获取引擎和服务的步骤 
+*/
+public void createGroup(){
+        //获取groupId,防止重复用UUID
+        String groupId = UUID.randomUUID().toString();
+        //新建Group
+        Group group = identityService.newGroup(groupId);
+        //设置属性
+        group.setName("用户组");
+        group.setType("Users");
+        //保存Group到数据库
+        identityService.saveGroup(group);
+        //查询Group
+   		Group result =identityService.createGroupQuery()
+       			.groupId(groupId).singleResult();
+        System.out.println("Name:"+result.getName()
+                           +"Id:"+result.getId()
+                           +"Type"+result.getType());
+    }
+```
+
+[^注意]: 调用newGroup()方法的时候groupId不能为空，否则会抛出 **groupid is null**的异常；主键重复的时候会抛出**Duplicate entry ‘1’ for key ‘PRIMARY’**的异常
+
+​	如果不用UUID也可指定一个String类型的groupId，然后在设置属性的时候调用.setId(null),activiti会自动生成主键。 
+
+#### 1.3 修改用户组
+
+```java
+/*
+*修改用户组，不能修改ID，否则保存时会报错
+*/
+public void updateGroup(){
+        //先查出用户组
+        Group group = identityService.createGroupQuery()
+            .groupName("用户组").singleResult();
+        //设置属性
+        group.setName("用户组");
+        group.setType("Users");
+        //如果修改Id，程序会报错如下
+        //GroupEntityImpl@22295ec4 was updated by another transaction concurrently
+        //group.setId(null);
+        //保存修改
+        identityService.saveGroup(group);
+    }
+```
+
+#### 1.4 删除用户组
+
+​	identityService方法提供了一个deleteGroup方法来删除用户组信息。
+
+​	ACtiviti各模块之间与用户组相关联的数据表，仅仅提供一个字段来记录用户组的id，没有做外键关联，例如act_ru_identitylink表。
+
+​	但像用户与用户组这样多对多的关系，Activiti还是设了一个中间表（act_id_membership），并做了外键关联。因此删除用户组的deleteGroup方法在执行的时候，会先将中间表里的关联数据删除，然后再删除用户组数据。
+
+```java
+/*
+*如果act_id_membership表中有关联的数据也会一并删除
+*/
+identityService.deleteGroup(String groupId)
+```
 
 
 
--添加资源文件
+### 2. Activiti数据的查询
 
-|--deployedment()
+> ​	Activiti提供了一套数据查询API供开发者使用，可以使用各个服务组件的createXXXQuery 方法来获取这些查询对象。本节将结合用户组数据来讲解Activiti的数据查询设计，这些设计可应用于整个Activiti的数据查询体系。
 
-|--添加压缩包
+#### 2.1 查询对象
 
-|--修改部署信息
+​	Activiti的各个服务组件均提供了createXXXQuery方法，返回一个Query实例；Query是所有查询对象的父接口，该接口提供了若干个基础方法
 
-|--取消部署验证
+| 方法名       | 属性                                               |
+| ------------ | -------------------------------------------------- |
+| asc          | 查询结果升序                                       |
+| count        | 计算查询结果的数据量                               |
+| desc         | 查询结果降序                                       |
+| list         | 封装查询结果，返回相应类型的集合                   |
+| listpage     | 分页返回查询结果                                   |
+| singleResult | 查询单条符合条件的数据，若查到多条数据，则抛出异常 |
+
+##### 2.1.1 list,listPage,count方法
+
+```java
+//list：返回所有的group对象并封装进List<>中
+List<Group> datas = identityService.createGroupQuery().list();
+//listPage：从索引为1的数据起，查询10条数据
+List<Group> datas2 = identityService.createGroupQuery().listPage(1,10)
+//count：统计group数量
+ int count = identityService.createGroupQuery().count();
+```
+
+##### 2.1.2 asc和desc排序
+
+​	Query提供了asc和desc方法，可以设置查询结果的排序方式，但是调用前必须告诉Query以何种条件进行排序即_orderByXXX方法_（如 orderByGroupId、orderByGroupName），否则会抛出**ActivitiException**，信息为：**You should call any of  the orderBy methods first before specifying a direction**；
+
+```java
+//注意排序后还是要调用list()或者listPage()方法才能返回具体的结果集，否则还是Query实例本身
+List<Group> datas=identityService.createGroupQuery().orderByGroupId().asc().list();
+```
+
+##### 2.1.3 多字段排序
+
+​	想要对多字段进行排序的时候要注意，如果调用了orderByXXX方法却没有调用一次asc()或desc()方法，则该排序方法会被下一次方法设置的查询条件覆盖
+
+```java
+        //先按Name升序排列，再按Id降序排列
+ List<Group> list = identityService.createGroupQuery()
+            .orderByGroupName().asc().orderByGroupId().desc().list();
+
+   for (Group group : list) {
+     System.out.println("Id:"+group.getId()+"Name:"+group.getName());  
+   }
+```
+
+
+
+##### 2.1.4 singleResult方法
+
+​	根据查询条件到数据库中查询唯一的数据记录，若没有符合条件的数据，会返回null。若查到多条记录，则抛出异常 ：**Query return 2 results instead of max 1**。一般与Id查询条件配合使用
+
+```java
+Group result = identityService.createGroupQuery().groupId(groupId).singleResult();
+```
+
+
+
+
+
+##### 2.1.5 用户组数据查询
+
+​	GroupQuery对象除了拥有Query接口的公用方法，还有自己的查询方法
+
+| 方法名                                | 属性                                             |
+| ------------------------------------- | ------------------------------------------------ |
+| groupId(String groupId)               | 根据ID查询数据                                   |
+| groupMember(String groupMemberUserId) | 根据用户ID查询用户所在的组                       |
+| groupName(String groupName)           | 根据用户组名称查询用户组                         |
+| groupNameLike(String groupName)       | 根据用户组名称模糊查询用户组                     |
+| groupType(String groupType)           | 根据用户组类型查询用户组                         |
+| orderByGroupId()                      | 设置根据Id排序                                   |
+| orderByGroupName()                    | 设置根据Name排序                                 |
+| orderByGroupType()                    | 设置根据类型排序                                 |
+| potentialStarter(String procDefId)    | 根据流程定义的Id查询有权限启动该流程定义的用户组 |
+
+[^注意！！]: 表中的方法的返回值都是`GroupQuery`对象，如果想要具体的数据都要调用**list()**或者**singleResult()**等方法
+
+
+
+### 3.用户的管理
+
+介绍用户表，增删改
+
+### 4.用户信息管理
+
+
+
+### 5.用户与用户组关系
+
+绑定关系，删除关系，查询用户组下的用户
+
+查询用户所在的用户组
+
+
+
+
+

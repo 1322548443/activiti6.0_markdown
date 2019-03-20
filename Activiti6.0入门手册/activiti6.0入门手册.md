@@ -906,29 +906,259 @@ List<Group> group = identityService.createUserQuery().groupMember(user.getId()).
 
 ## 五、流程存储服务
 
+​	RepositoryService负责对流程文件的部署以及流程的定义进行管理，不管是JBPM还是Activiti等工作流引擎都会产生流程文件。在Activiti中这些数据被保存在==act_ge_bytearray==表中。
+
 ### 1. 流程文件的部署
 
 #### 1.1Deployment对象
 
-#### 1.2 DeploymentBuilder对象
+​	Deployment对象也是一个接口，一个Deployment实例代表一条==act_re_deployment==表的数据。子接口为DeploymentEntity，实现类为DeploymentEntityImpl，以下是映射表
+
+| 字段名          | 属性名         | 属性                                         |
+| --------------- | -------------- | -------------------------------------------- |
+| ID_             | id             | 主键                                         |
+| NAME_           | name           | 部署名称                                     |
+| CATEGORY_       | category       | 部署类别                                     |
+| KEY_            | key            | 为部署设置键属性                             |
+| TENANT_ID_      | tenantId       | 同一个软件可能被多个租户使用，预留字段租户ID |
+| DEPLOY_TIME     | deploymentTime | 部署时间                                     |
+| ENGINE_VERSION_ | engineVersion  | 引擎版本                                     |
+
+
+
+#### 1.2 获取DeploymentBuilder对象
+
+​	对流程文件进行部署需要使用DeploymentBuilder对象，获取该对象可以调用RespositoryService的createDeployment方法，具体代码如下：
+
+```java
+//得到流程存储服务实例
+RepositoryService repositoryService = engine.getRepositoryService();
+//创建DeploymentBuilder对象
+DeploymentBuilder builder = repositoryService.createDeployment();
+```
 
 #### 1.3 添加流程文件五种方法
 
+​	DeploymentBuilder 中包含了多种 addXXX方法，可以为流程部署添加资源。
+
+| 方法                                                  | 属性                             |
+| ----------------------------------------------------- | -------------------------------- |
+| addClasspathResource(String resource)                 | 添加classpath下的资源文件        |
+| addInputStream(String resourceName,InputStream)       | 添加输入流资源                   |
+| addString(String resourceName,String text)            | 添加字符串资源                   |
+| addZipInputStream(ZipInputStream inputStream)         | 添加zip压缩包资源                |
+| addBpmnModel(String resourceName,BpmnModel bpmnModel) | 解析BPMN模型对象，并作为资源保存 |
+| addBytes(String resourceName,byte[] bytes)            | 添加字节资源                     |
+
+以下通过代码示范一些添加资源文件的方法
+
+#####  1.3.1 添加输入流资源
+
+​	在DeploymentEntityImpl类中，用一个Map来维护资源，表示一次部署中会有多个资源。调用 addInputStream 方法，实际上就是网DeploymentEntityImpl的Map里面添加元素，Map的key是资源名称，value的解析InputStream后获得的byte数组。
+
+```java
+/* 
+ * 省去了获取流程引擎和流程存储服务实例的步骤
+ * RepositoryService repositoryService
+ */
+	//第一个资源输入流
+	InputStream is1 = new FileInputStream(new File("resource1"));
+	//第二个资源输入流
+	InputStream is2 = new FileInputStream(new File("resource2"));
+	//创建DeploymentBuilder实例
+	DeploymentBuilder builder = repositoryService.createDeployment();
+	builder.addInputStream("inputA",is1);
+	builder.addInputStream("inputB",is2);
+	//执行部署方法
+	builder.deploy();
+```
+
+
+
+##### 1.3.2 添加 classpath 资源
+
+​	与addInputStream方法类似，addClasspathResource方法也是向部署实体的Map里面添加元素。但不同的是addClasspathResource方法会将指定的 classpath 下的资源文件转换为 InputStream ，再调用 addInputStream 方法。
+
+```java
+/* 
+ * 省去了获取流程引擎和流程存储服务实例的步骤
+ * RepositoryService repositoryService
+ */
+	//创建DeploymentBuilder实例
+	DeploymentBuilder builder = repositoryService.createDeployment();
+	//一次添加一个文件
+	builder.addClasspathResource("resource1");
+	builder.addClasspathResource("resource2");
+	//执行部署方法
+	builder.deploy();
+```
+
+
+
+##### 1.3.3 添加压缩包资源
+
+​	在实际应用中，可能要将多个资源部署到流程引擎中，可以将这些关联的资源压缩在一个zip包中，可以调用addZipInputStream方法直接部署该压缩包，该方法会遍历压缩包中的全部文件，再将其转换为byte数组，写入资源表中
+
+```java
+/* 
+ * 省去了获取流程引擎和流程存储服务实例的步骤
+ * RepositoryService repositoryService
+ */
+	//创建DeploymentBuilder实例
+	DeploymentBuilder builder = repositoryService.createDeployment();
+	//获取zip资源流
+	FileInputStream fis = new FileInputStream(new File("resource.zip"));
+	//读取zip文件，创建 ZipInputStream 对象
+	ZipInputStream zi = new ZipInputStream(fis);
+	//添加Zip压缩包资源
+	builder.addZipInputStream(zi);
+	//执行部署
+	builder.deploy();
+```
+
+
+
+##### 1.3.4 添加BPMN模型资源
+
+​	DeploymentBuilder提供了一个 addBpmnModel 方法，可传入BPMN规范的模型来进行部署。
+
+```java
+/* 
+ * 省去了获取流程引擎和流程存储服务实例的步骤
+ * RepositoryService repositoryService
+ */
+	DeploymentBuilder builder = repositoryService.createDeployment(); 
+	builder.addBpmnModel("MyCodeProcess",createProcessModel()) 
+		.name("MyCodeDeploy").deploy();
+    
+private BpmnModel createProcessModel() { 
+	//创建 BPMN 模型对象
+	BpmnModel model= new BpmnModel(); 
+	org.activiti.bpmn.model.Process process= new org.activiti.bpmn.model.Process(); 
+	model.addProcess(process) ; 
+	process.setid("myProcess"); 
+	process.setName("My Process"); 
+	//开始事件
+	StartEvent startEvent = new StartEvent(); 
+	startEvent.setid("startEvent"); 
+	process.addFlowElement(startEvent); 
+	//用户任务
+	UserTask userTask =new UserTask(); 
+	userTask.setName("User Task"); 
+	userTask.setid("userTask"); 
+	process.addFlowElement(userTask); 
+	//结束事件
+	EndEvent endEvent =new EndEvent(); 
+	endEvent.setid("endEvent"); 
+	process addFlowElement(endEvent);
+	//添加流程顺序
+	process.addFlowElement(new SequenceFlow("startEvent","userTask")); 
+	process.addFlowElement(new SequenceFlow("userTask","endEvent")); 
+	return model; 
+}
+```
+
+
+
+##### 1.3.5 addString 和addBytes方法
+
+​	addBytes方法比较简单，直接将资源名称与byte数组添加到DeploymentEntityImpl的Map中，不再赘述了。而addString方法也就是将String类型的数据转化为byte类型，再调用addBytes方法。
+
 #### 1.4 修改部署信息
 
-#### 1.5 过滤重复部署和取消部署验证
+​	使用DeploymentBuilder的name、key、category、tenanId方法可以设置属性。
+
+```java
+builder.name("name").tenantId("tenantId").key("key").category("category");
+```
+
+#### 1.5 流程部署
+
+​	添加资源文件后可调用deploy方法完成流程的部署，部署后会在act_re_procdef表中写入部署流程的数据
+
+```java
+builder.addClasspathResource("resource").deploy();
+```
+
+
+
+#### 1.6 过滤重复部署和取消部署验证
+
+两次部署之间资源没有任何变化，为了防止数据库的重复写入，在部署的时候调用enableDuplicateFiltering方法，它会根据部署对象名称去数据库中查找最后一条部署记录，如果发现最后一条记录与当前部署的记录一致就不会重新部署。这里的一致指的是资源文件和资源名一样。
+
+```java
+builder.addClassPathResource(String resource).enableDuplicateFiltering();
+```
+
+取消部署验证
+
+```java
+builder.disableSchemaValidation()  //取消xml验证
+builder.disableBpmnValidation()   //取消bpmn验证
+```
 
 
 
 ### 2. 流程定义管理
 
+​	流程定义管理是指由RepositoryService提供的一系列对流程定义的控制，包括中止流程定义、激活流程定义和设置流程权限等。
+
 #### 2.1 ProcessDefinition对象
 
-#### 2.2 流程部署，流程图部署
+​	ProcessDefinition对象是一个接口，一个ProcessDefinition实例代表一条流程定义数据，它的实现类为ProcessDefinitionEntityImpl，对应的表为==act_re_procdef==。
 
-#### 2.3 中止和激活流程定义
+#### 2.2 获取ProcessDefinition对象
 
-#### 2.4 流程缓存设置
+​	获取ProcessDefinition对象要求已经有流程部署了，即act_re_procdef 表中必须有数据。然后可以通过`repositoryService.createProcessDefinitionQuery()`去调用对应的方法获取流程定义对象，下表列出了几种方法：
+
+| 方法                                                | 说明                     |
+| --------------------------------------------------- | ------------------------ |
+| processDefinitionCategory(String category)          | 根据类别查询流程定义     |
+| processDefinitionCategoryNotEquals(String category) | 列出不包含字段的类别查询 |
+| processDefinitionCategoryLike(String categoryLike)  | 根据类别 模糊 查询       |
+| processDefinitionName(String name)                  | 根据name查询             |
+| processDefinitionId(String id)                      | 根据ID查询单个流程实例   |
+| processDefinitionIds(Set<String> ids)               | 多ID 查询返回集合        |
+| processDefinitionKey(String key)                    | 根据关键词查询           |
+| deploymentId(String id)                             | 根据流程部署id查询       |
+| deploymentIds(Set<String> ids)                      | 根据多个流程部署id查询   |
+
+​	如果想要具体的对象或者对象集 还需要调用singleResult() 或者 list()方法。
+
+
+
+#### 2.3 挂起和激活流程定义
+
+​	流程的挂起与激活在实际生产中常常会用到，下面是具体的代码示例：
+
+```java
+	//这里演示根据流程实例ID挂起、激活流程实例
+	String id  =  processDefinition.getId();   
+   // 根据一个流程实例的id挂起流程实例
+   runtimeService.suspendProcessInstanceById(id);
+    // 根据一个流程实例的id激活流程实例
+   runtimeService.activateProcessInstanceById(id);
+
+	//其他的根据key，tendeId（租户ID） 等参数就不赘述了，根据实际情况灵活使用
+```
+
+**_注意：流程挂起后不能重复挂起，只能激活后再挂起，激活同样也是如此_**
+
+#### 2.4 流程缓存设置 (待施工…)
+
+​	为了提高响应性能，Activiti读取流程后将一些常用项做了一个缓存存在一个Map中，key是流程定义的Id
+
+获取缓存….
+
+还没测出来…
+
+后续添加吧….
+
+ 流程缓存在配置文件的配置项，value表示缓存最大数量
+
+```xml
+<property name="processDefinitionCacheLimit" value="5" />
+```
 
 
 

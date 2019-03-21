@@ -1166,6 +1166,8 @@ builder.disableBpmnValidation()   //取消bpmn验证
 
 #### 3.1 设置权限
 
+repositoryService.addCandidateStarterUser
+
 #### 3.2 IdentityLink对象
 
 #### 3.3 查询权限数据

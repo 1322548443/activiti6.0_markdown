@@ -1166,13 +1166,22 @@ builder.disableBpmnValidation()   //取消bpmn验证
 
 #### 3.1 设置权限
 
-repositoryService.addCandidateStarterUser
+```java
+repositoryService.addCandidateStarterUser("流程定义ID","用户ID");
+repositoryService.addCandidateStarterGroup("流程定义ID","组ID");
+```
 
 #### 3.2 IdentityLink对象
 
+​	一个IdentutyLink对象表示一种 身份数据与流程绑定的关系。
+
 #### 3.3 查询权限数据
 
-
+```java
+//根据用户查询有权限的流程定义
+List<ProcessDefinition> list = repositoryService
+        .createProcessDefinitionQuery().startableByUser("用户User对象").list();
+```
 
 ### 4. 数据的查询与删除
 
